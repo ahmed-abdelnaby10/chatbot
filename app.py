@@ -41,7 +41,7 @@ MODELS = {
     "Qwen/Qwen3-32B": "Qwen/Qwen3-32B",
     "Qwen/Qwen3-Next-80B-A3B-Instruct": "Qwen/Qwen3-Next-80B-A3B-Instruct",
     "google/gemma-2-2b-it": "google/gemma-2-2b-it",
-    "MBZUAI-Paris/Nile-Chat-4B": "MBZUAI-Paris/Nile-Chat-4B",
+    "Qwen/Qwen2.5-7B-Instruct": "Qwen/Qwen2.5-7B-Instruct",
 }
 
 # =========================
@@ -55,13 +55,15 @@ selected_model = st.sidebar.selectbox(
     index=0,
 )
 
+default_prompt = (
+    "You are a helpful AI assistant. You understand Arabic and Egyptian dialect (العامية المصرية) very well."
+    if selected_model == "Qwen/Qwen2.5-7B-Instruct"
+    else "You are a helpful AI assistant."
+)
+
 system_prompt = st.sidebar.text_area(
     "System prompt",
-    value=(
-        "You are a helpful AI assistant."
-        if selected_model != "MBZUAI-Paris/Nile-Chat-4B"
-        else "You are a helpful AI assistant. You understand Arabic and Egyptian dialect (العامية المصرية) very well."
-    ),
+    value=default_prompt,
     help="Controls how the model behaves.",
 )
 
