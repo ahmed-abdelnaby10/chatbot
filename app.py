@@ -60,29 +60,27 @@ def estimate_tokens(text: str) -> int:
     return len(text.split())
 
 
-def strip_think_stream(chunk: str, inside_think: bool):
+def clean_think(raw: str) -> str:
     """
-    Remove <think>...</think> while streaming.
+    Hide <think> content nicely during streaming.
 
-    Returns:
-      (clean_text, updated_inside_think_flag)
+    - If no <think>: return all.
+    - If <think> but no </think> yet: return text before <think>.
+    - If both: remove the whole <think>...</think> block.
     """
-    out_chars = []
-    i = 0
-    while i < len(chunk):
-        if not inside_think and chunk.startswith("<think>", i):
-            inside_think = True
-            i += len("<think>")
-        elif inside_think and chunk.startswith("</think>", i):
-            inside_think = False
-            i += len("</think>")
-        elif inside_think:
-            # We're inside <think>...</think>, skip chars
-            i += 1
-        else:
-            out_chars.append(chunk[i])
-            i += 1
-    return "".join(out_chars), inside_think
+    start = raw.find("<think>")
+    if start == -1:
+        # no think at all
+        return raw
+
+    end = raw.find("</think>", start)
+    if end == -1:
+        # think started, not closed yet -> hide everything from <think> onward
+        return raw[:start]
+
+    # both present -> cut out the whole block
+    end += len("</think>")
+    return raw[:start] + raw[end:]
 
 
 # =========================
@@ -109,11 +107,10 @@ system_prompt = st.sidebar.text_area(
     help="Controls how the model behaves.",
 )
 
-# Init / reset session state
+# Init / sync session state
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "system", "content": system_prompt}]
 
-# Keep system prompt in sync with first message
 if (
     st.session_state.messages
     and st.session_state.messages[0]["role"] == "system"
@@ -152,13 +149,13 @@ if user_input:
         st.markdown(user_input)
 
     # 3) Stream assistant answer
-    visible_reply = ""  # what we show
-    inside_think = False  # tracking <think> sections
+    raw_reply = ""  # full raw stream (with think if any)
+    visible_reply = ""  # cleaned version we show
     output_tokens = 0
 
     with st.chat_message("assistant"):
-        placeholder = st.empty()  # live text
-        token_box = st.empty()  # token counter
+        placeholder = st.empty()
+        token_box = st.empty()
 
         try:
             stream = client.chat.completions.create(
@@ -173,18 +170,16 @@ if user_input:
                 if not delta or not delta.content:
                     continue
 
-                # Clean the new piece from <think>...</think>
-                clean_piece, inside_think = strip_think_stream(
-                    delta.content,
-                    inside_think,
-                )
+                # Append raw content from model
+                raw_reply += delta.content
 
-                if clean_piece:
-                    visible_reply += clean_piece
-                    placeholder.markdown(visible_reply)
+                # Compute cleaned view each time
+                visible_reply = clean_think(raw_reply)
 
-                    output_tokens = estimate_tokens(visible_reply)
-                    token_box.caption(f"Output tokens (approx): {output_tokens}")
+                # Update UI
+                placeholder.markdown(visible_reply)
+                output_tokens = estimate_tokens(visible_reply)
+                token_box.caption(f"Output tokens (approx): {output_tokens}")
 
         except Exception as e:
             visible_reply = f"⚠️ Error from model: {e}"
