@@ -1,5 +1,4 @@
 import os
-import re
 import streamlit as st
 from openai import OpenAI
 
@@ -54,21 +53,36 @@ MODELS = {
 # =========================
 
 
-def strip_think_blocks(text: str) -> str:
-    """
-    Remove any <think>...</think> blocks from the response.
-    """
-    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    return cleaned.strip()
-
-
 def estimate_tokens(text: str) -> int:
-    """
-    Very rough token estimate (good enough for display).
-    """
+    """Rough token estimate for display purposes."""
     if not text:
         return 0
     return len(text.split())
+
+
+def strip_think_stream(chunk: str, inside_think: bool):
+    """
+    Remove <think>...</think> while streaming.
+
+    Returns:
+      (clean_text, updated_inside_think_flag)
+    """
+    out_chars = []
+    i = 0
+    while i < len(chunk):
+        if not inside_think and chunk.startswith("<think>", i):
+            inside_think = True
+            i += len("<think>")
+        elif inside_think and chunk.startswith("</think>", i):
+            inside_think = False
+            i += len("</think>")
+        elif inside_think:
+            # We're inside <think>...</think>, skip chars
+            i += 1
+        else:
+            out_chars.append(chunk[i])
+            i += 1
+    return "".join(out_chars), inside_think
 
 
 # =========================
@@ -83,7 +97,6 @@ selected_model = st.sidebar.selectbox(
     index=0,
 )
 
-# Default system prompt depends on model (Arabic-friendly for Qwen2.5-7B)
 default_prompt = (
     "You are a helpful AI assistant. You understand Arabic and Egyptian dialect (العامية المصرية) very well."
     if selected_model == "Qwen/Qwen2.5-7B-Instruct"
@@ -96,10 +109,11 @@ system_prompt = st.sidebar.text_area(
     help="Controls how the model behaves.",
 )
 
+# Init / reset session state
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "system", "content": system_prompt}]
 
-# Sync system prompt with first message
+# Keep system prompt in sync with first message
 if (
     st.session_state.messages
     and st.session_state.messages[0]["role"] == "system"
@@ -107,7 +121,6 @@ if (
 ):
     st.session_state.messages[0]["content"] = system_prompt
 
-# Reset conversation button
 if st.sidebar.button("Reset conversation"):
     st.session_state.messages = [{"role": "system", "content": system_prompt}]
     st.experimental_rerun()
@@ -138,17 +151,16 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # 3) Prepare assistant message container
-    full_reply = ""
-    clean_reply = ""
+    # 3) Stream assistant answer
+    visible_reply = ""  # what we show
+    inside_think = False  # tracking <think> sections
     output_tokens = 0
 
     with st.chat_message("assistant"):
-        placeholder = st.empty()
-        token_box = st.empty()
+        placeholder = st.empty()  # live text
+        token_box = st.empty()  # token counter
 
         try:
-            # Streaming call
             stream = client.chat.completions.create(
                 model=MODELS[selected_model],
                 messages=st.session_state.messages,
@@ -158,24 +170,27 @@ if user_input:
 
             for chunk in stream:
                 delta = chunk.choices[0].delta
-                if delta and delta.content:
-                    full_reply += delta.content
+                if not delta or not delta.content:
+                    continue
 
-                    # Clean on the fly (removing <think> if present)
-                    clean_reply = strip_think_blocks(full_reply)
+                # Clean the new piece from <think>...</think>
+                clean_piece, inside_think = strip_think_stream(
+                    delta.content,
+                    inside_think,
+                )
 
-                    # Update typing effect
-                    placeholder.markdown(clean_reply)
+                if clean_piece:
+                    visible_reply += clean_piece
+                    placeholder.markdown(visible_reply)
 
-                    # Update token estimate
-                    output_tokens = estimate_tokens(clean_reply)
+                    output_tokens = estimate_tokens(visible_reply)
                     token_box.caption(f"Output tokens (approx): {output_tokens}")
 
         except Exception as e:
-            clean_reply = f"⚠️ Error from model: {e}"
-            placeholder.markdown(clean_reply)
-            output_tokens = estimate_tokens(clean_reply)
+            visible_reply = f"⚠️ Error from model: {e}"
+            placeholder.markdown(visible_reply)
+            output_tokens = estimate_tokens(visible_reply)
             token_box.caption(f"Output tokens (approx): {output_tokens}")
 
     # 4) Save final clean reply in history
-    st.session_state.messages.append({"role": "assistant", "content": clean_reply})
+    st.session_state.messages.append({"role": "assistant", "content": visible_reply})
