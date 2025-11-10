@@ -5,7 +5,11 @@ from openai import OpenAI
 # =========================
 # 1) API KEY SETUP
 # =========================
-HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
+
+HUGGINGFACE_API_KEY = st.secrets.get(
+    "HUGGINGFACE_API_KEY", os.getenv("HUGGINGFACE_API_KEY", "")
+)
+
 
 if not HUGGINGFACE_API_KEY:
     st.error("❌ Missing HUGGINGFACE_API_KEY. Set it as an environment variable.")
@@ -107,5 +111,5 @@ if user_input:
     with st.chat_message("assistant"):
         st.markdown(reply)
 
-    # Save reply to history.
+    # Save reply to history
     st.session_state.messages.append({"role": "assistant", "content": reply})
