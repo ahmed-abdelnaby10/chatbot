@@ -107,5 +107,5 @@ if user_input:
     with st.chat_message("assistant"):
         st.markdown(reply)
 
-    # Save reply to history
+    # Save reply to history.
     st.session_state.messages.append({"role": "assistant", "content": reply})
